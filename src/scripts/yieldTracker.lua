@@ -10,11 +10,11 @@ YieldTracker = {
     modDir = g_currentModDirectory,
     yieldData = {},       -- yieldData[year][farmlandId][fillTypeIndex] = { amount = liters }
     unresolvedData = {},  -- saved entries whose fill type is not loaded (e.g. map/mod removed), kept so they survive a save
-    returnedLiters = {},  -- returnedLiters[farmlandId][fillTypeIndex] = liters unloaded back onto the ground, not new yield when picked up again
+    availableLiters = {}, -- availableLiters[farmlandId][fillTypeKey][year] = liters field work placed on the ground, not picked up yet
     windrowFillTypes = {},       -- set of crop windrow fill types (straw, grass, ...)
     pickupFillTypeCache = {},    -- fillTypeIndex -> true, or the time until which it counts as not pickable
     saveFileName = "yieldTrackerData.xml",
-    saveVersion = 2,
+    saveVersion = 3,
     isActive = false,
 }
 YieldTracker.debug = false
@@ -82,7 +82,7 @@ function YieldTracker.combineAddCutterArea(combine, superFunc, area, liters, inp
         if cutter ~= nil and cutter.getWorkAreaByIndex ~= nil then
             workArea = cutter:getWorkAreaByIndex(1)
 
-            -- Pickup headers collect windrows from the ground, which may have been unloaded there
+            -- Pickup headers collect windrows from the ground, which only count while field material is available
             local spec = cutter.spec_cutter
             if spec ~= nil and spec.useWindrow then
                 pickupFillType = spec.currentInputFillType
@@ -140,7 +140,7 @@ end
 
 
 -- Marks tipping done by trailers, loader wagons, shovels etc. unloading onto the ground, as opposed to
--- mowers, combines and windrowers creating windrows from the field.
+-- mowers, combines and windrowers placing windrows from field work.
 local function endDischargeToGround(...)
     YieldTracker.isDischargingToGround = false
     return ...
@@ -152,16 +152,22 @@ function YieldTracker.dischargeableDischargeToGround(vehicle, superFunc, dischar
 end
 
 
--- Every heap/windrow placed on the ground goes through here. Unloaded material (and material placed without a vehicle,
--- e.g. a bale cut open) is remembered per farmland, so picking it up again is not counted as yield twice.
+-- Everything placed on or taken off the ground goes through here. Tracks how much material field work has made available:
+-- combines and mowers add to it, tedders and rakes take material off and put it back, so they cancel out.
+-- Unloading and vehicle-less placing (e.g. a bale cut open) are ignored, so picking that material up can't add yield.
+-- Pickups by balers, loader wagons and pickup headers are deducted in recordHarvest; shovels are ignored.
 local function onTippedToGround(vehicle, delta, fillTypeIndex, sx, sz, ex, ez, ...)
-    local dropped = ...
+    local tippedLiters = ...
     local tracker = getActiveTracker()
 
-    if tracker ~= nil and delta > 0 and type(dropped) == "number" and dropped > 0
-        and (vehicle == nil or YieldTracker.isDischargingToGround) and g_currentMission:getIsServer()
-        and tracker:getIsPickupFillType(fillTypeIndex) then
-        tracker:addReturnedLiters((sx + ex) / 2, (sz + ez) / 2, fillTypeIndex, dropped)
+    if tracker ~= nil and vehicle ~= nil and type(tippedLiters) == "number" and g_currentMission:getIsServer() then
+        local isFieldWorkDrop = delta > 0 and tippedLiters > 0 and not YieldTracker.isDischargingToGround
+        local isWindrowMove = delta < 0 and tippedLiters < 0
+            and (vehicle.spec_tedder ~= nil or vehicle.spec_windrower ~= nil or vehicle.spec_mower ~= nil)
+
+        if (isFieldWorkDrop or isWindrowMove) and tracker:getIsPickupFillType(tracker:getAvailableFillTypeKey(fillTypeIndex)) then
+            tracker:changeAvailableLiters((sx + ex) / 2, (sz + ez) / 2, fillTypeIndex, tippedLiters)
+        end
     end
 
     return ...
@@ -242,8 +248,8 @@ end
 
 
 ---Adds a harvested amount to the yieldData table. Also referenced during game save.
----Pickups (balers, loader wagons, pickup headers) pass what they collected from the ground, so material that was
----unloaded back onto this farmland is deducted instead of being counted a second time.
+---Pickups (balers, loader wagons, pickup headers) pass what they collected from the ground. It only counts as yield
+---while field work on this farmland has material available, so a dumped heap can't be counted a second time.
 function YieldTracker:recordHarvest(vehicle, workArea, fillTypeIndex, amount, pickupFillTypeIndex, pickupLiters)
     if fillTypeIndex == nil or fillTypeIndex == FillType.UNKNOWN or amount <= 0 then return end
     if g_fillTypeManager:getFillTypeByIndex(fillTypeIndex) == nil then return end
@@ -252,11 +258,11 @@ function YieldTracker:recordHarvest(vehicle, workArea, fillTypeIndex, amount, pi
     if farmlandId == nil then return end
 
     if pickupFillTypeIndex ~= nil and pickupLiters ~= nil and pickupLiters > 0 then
-        local newLiters = self:consumeReturnedLiters(farmlandId, pickupFillTypeIndex, pickupLiters)
-        if newLiters < pickupLiters then
-            self:debugMessage(string.format("Picked up %.2fL previously unloaded on farmland %d; not counted again", pickupLiters - newLiters, farmlandId))
+        local collectedLiters = self:consumeAvailableLiters(farmlandId, pickupFillTypeIndex, pickupLiters)
+        if collectedLiters < pickupLiters then
+            self:debugMessage(string.format("Picked up %.2fL with no field material left on farmland %d; not counted", pickupLiters - collectedLiters, farmlandId))
         end
-        amount = amount * newLiters / pickupLiters
+        amount = amount * collectedLiters / pickupLiters
         if amount <= 0 then return end
     end
 
@@ -284,16 +290,31 @@ function YieldTracker:addAmount(year, farmlandId, fillTypeIndex, amount)
 end
 
 
--- Remembers material unloaded back onto the ground per farmland and fill type.
-function YieldTracker:addReturnedLiters(x, z, fillTypeIndex, liters)
+-- Grass and hay share one available amount, since drying can turn one into the other without going through
+-- tipToGroundAroundLine (e.g. FS25_MoistureSystem uses changeFillTypeAtArea).
+function YieldTracker:getAvailableFillTypeKey(fillTypeIndex)
+    if fillTypeIndex == FillType.DRYGRASS_WINDROW then
+        return FillType.GRASS_WINDROW
+    end
+    return fillTypeIndex
+end
+
+
+-- Changes the material field work has made available at a position, in the current year's amount.
+-- Rakes and tedders can briefly take this below 0 when they lift dumped material; it cancels out when they drop it again.
+function YieldTracker:changeAvailableLiters(x, z, fillTypeIndex, liters)
     local farmlandId = self:getFarmlandIdAtPosition(x, z)
     if farmlandId == nil then return end -- pickups off farmland are never recorded
 
-    self.returnedLiters[farmlandId] = self.returnedLiters[farmlandId] or {}
-    self.returnedLiters[farmlandId][fillTypeIndex] = (self.returnedLiters[farmlandId][fillTypeIndex] or 0) + liters
+    local key = self:getAvailableFillTypeKey(fillTypeIndex)
+    local year = g_currentMission.environment.currentYear
 
-    self:debugMessage(string.format("%.2fL of %s unloaded onto farmland %d",
-        liters, tostring(g_fillTypeManager:getFillTypeNameByIndex(fillTypeIndex)), farmlandId))
+    self.availableLiters[farmlandId] = self.availableLiters[farmlandId] or {}
+    self.availableLiters[farmlandId][key] = self.availableLiters[farmlandId][key] or {}
+    self.availableLiters[farmlandId][key][year] = (self.availableLiters[farmlandId][key][year] or 0) + liters
+
+    self:debugMessage(string.format("Available %s on farmland %d changed by %.2fL",
+        tostring(g_fillTypeManager:getFillTypeNameByIndex(key)), farmlandId, liters))
 end
 
 
@@ -324,16 +345,33 @@ function YieldTracker:getIsPickupFillType(fillTypeIndex)
 end
 
 
--- Deducts a pickup from the material unloaded on that farmland and returns the part that is new yield.
-function YieldTracker:consumeReturnedLiters(farmlandId, fillTypeIndex, liters)
-    local returned = self.returnedLiters[farmlandId] ~= nil and self.returnedLiters[farmlandId][fillTypeIndex] or 0
-    if returned <= 0 then
-        return liters
+-- Deducts a pickup from the material available on that farmland and returns the part that counts as yield.
+-- Uses last year's amount first. Anything older is dropped, so missed or plowed-under straw can't build up over the years.
+function YieldTracker:consumeAvailableLiters(farmlandId, fillTypeIndex, liters)
+    local key = self:getAvailableFillTypeKey(fillTypeIndex)
+    local amounts = self.availableLiters[farmlandId] ~= nil and self.availableLiters[farmlandId][key] or nil
+    if amounts == nil then
+        return 0
     end
 
-    local consumed = math.min(returned, liters)
-    self.returnedLiters[farmlandId][fillTypeIndex] = returned - consumed
-    return liters - consumed
+    local currentYear = g_currentMission.environment.currentYear
+    for year in pairs(amounts) do
+        if year < currentYear - 1 then
+            amounts[year] = nil
+        end
+    end
+
+    local collected = 0
+    for year = currentYear - 1, currentYear do
+        local available = amounts[year] or 0
+        if available > 0 and collected < liters then
+            local consumed = math.min(available, liters - collected)
+            amounts[year] = available - consumed
+            collected = collected + consumed
+        end
+    end
+
+    return collected
 end
 
 
@@ -433,7 +471,7 @@ end
 function YieldTracker:consoleCommandClearData()
     self.yieldData = {}
     self.unresolvedData = {}
-    self.returnedLiters = {}
+    self.availableLiters = {}
     return "YieldTracker data cleared. Save the game to also clear the savegame file."
 end
 
@@ -447,7 +485,7 @@ function YieldTracker:shutdown()
     self.isActive = false
     self.yieldData = {}
     self.unresolvedData = {}
-    self.returnedLiters = {}
+    self.availableLiters = {}
     YieldTracker.activeCutter = nil
     YieldTracker.isDischargingToGround = false
 end
@@ -458,7 +496,7 @@ end
 function YieldTracker:loadYieldData()
     self.yieldData = {}
     self.unresolvedData = {}
-    self.returnedLiters = {}
+    self.availableLiters = {}
 
     if not g_currentMission or not g_currentMission.missionInfo.savegameDirectory then
         self:debugMessage("Load skipped: no savegame directory")
@@ -522,22 +560,24 @@ function YieldTracker:loadYieldData()
         i = i + 1
     end
 
-    -- Material unloaded back onto the ground that has not been picked up yet
-    local r = 0
+    -- Field material on the ground that has not been picked up yet
+    local a = 0
     while true do
-        local returnedKey = string.format("yieldData.returnedToGround.entry(%d)", r)
-        if not hasXMLProperty(xmlFile, returnedKey) then break end
+        local availableKey = string.format("yieldData.availableWindrows.entry(%d)", a)
+        if not hasXMLProperty(xmlFile, availableKey) then break end
 
-        local farmlandId = getXMLInt(xmlFile, returnedKey .. "#farmland")
-        local fillTypeIndex = g_fillTypeManager:getFillTypeIndexByName(getXMLString(xmlFile, returnedKey .. "#fillType"))
-        local liters = getXMLFloat(xmlFile, returnedKey .. "#liters")
+        local farmlandId = getXMLInt(xmlFile, availableKey .. "#farmland")
+        local fillTypeIndex = g_fillTypeManager:getFillTypeIndexByName(getXMLString(xmlFile, availableKey .. "#fillType"))
+        local year = getXMLInt(xmlFile, availableKey .. "#year")
+        local liters = getXMLFloat(xmlFile, availableKey .. "#liters")
 
-        if farmlandId ~= nil and g_farmlandManager:getFarmlandById(farmlandId) ~= nil and fillTypeIndex ~= nil and liters ~= nil and liters > 0 then
-            self.returnedLiters[farmlandId] = self.returnedLiters[farmlandId] or {}
-            self.returnedLiters[farmlandId][fillTypeIndex] = liters
+        if farmlandId ~= nil and g_farmlandManager:getFarmlandById(farmlandId) ~= nil and fillTypeIndex ~= nil and year ~= nil and liters ~= nil and liters > 0 then
+            self.availableLiters[farmlandId] = self.availableLiters[farmlandId] or {}
+            self.availableLiters[farmlandId][fillTypeIndex] = self.availableLiters[farmlandId][fillTypeIndex] or {}
+            self.availableLiters[farmlandId][fillTypeIndex][year] = liters
         end
 
-        r = r + 1
+        a = a + 1
     end
 
     delete(xmlFile)
@@ -601,17 +641,21 @@ function YieldTracker:saveYieldData()
         i = i + 1
     end
 
-    -- Save material unloaded back onto the ground that has not been picked up yet
-    local r = 0
-    for farmlandId, fillTypes in pairs(self.returnedLiters) do
-        for fillTypeIndex, liters in pairs(fillTypes) do
+    -- Save field material on the ground that has not been picked up yet, skipping amounts too old to be used
+    local currentYear = g_currentMission.environment.currentYear
+    local a = 0
+    for farmlandId, fillTypes in pairs(self.availableLiters) do
+        for fillTypeIndex, amounts in pairs(fillTypes) do
             local fillTypeName = g_fillTypeManager:getFillTypeNameByIndex(fillTypeIndex)
-            if fillTypeName ~= nil and liters > 0.001 then
-                local returnedKey = string.format("yieldData.returnedToGround.entry(%d)", r)
-                setXMLInt(xmlFile, returnedKey .. "#farmland", farmlandId)
-                setXMLString(xmlFile, returnedKey .. "#fillType", fillTypeName)
-                setXMLFloat(xmlFile, returnedKey .. "#liters", liters)
-                r = r + 1
+            for year, liters in pairs(amounts) do
+                if fillTypeName ~= nil and year >= currentYear - 1 and liters > 0.001 then
+                    local availableKey = string.format("yieldData.availableWindrows.entry(%d)", a)
+                    setXMLInt(xmlFile, availableKey .. "#farmland", farmlandId)
+                    setXMLString(xmlFile, availableKey .. "#fillType", fillTypeName)
+                    setXMLInt(xmlFile, availableKey .. "#year", year)
+                    setXMLFloat(xmlFile, availableKey .. "#liters", liters)
+                    a = a + 1
+                end
             end
         end
     end

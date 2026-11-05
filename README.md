@@ -43,7 +43,7 @@ Yield is recorded at the moment the game turns crop on the ground into liters, r
 
 Yield is attributed to the farmland under the header/pickup.
 
-Material unloaded back onto the ground (trailers, loader wagons and front loaders tipping, or bales cut open) is remembered per farmland. When a baler, loader wagon or pickup header later collects it, that amount is deducted first, so the same straw/grass/hay is never counted twice. Save data stores crops by fill type name (e.g. `WHEAT`), so it stays correct when maps or mods add or remove fill types. Yield history from older versions is converted automatically. Amounts recorded by older versions may be less accurate than new ones.
+Straw, grass and hay count when they are collected, not when they are dropped. Combines and mowers placing windrows add to an available amount per farmland, and a baler, loader wagon or pickup header only records yield while that amount lasts. Heaps unloaded from trailers or front loaders and bales cut open don't add to it, so the same material isn't counted twice. Grass and hay share one amount, and amounts from before last year are ignored. Save data stores crops by fill type name (e.g. `WHEAT`), so it stays correct when maps or mods add or remove fill types. Yield history from older versions is converted automatically. Amounts recorded by older versions may be less accurate than new ones.
 
 ---
 

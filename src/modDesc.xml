@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="115">
 <author>AntCant</author>
-<version>1.1.0.0</version>
+<version>1.2.0.0</version>
 <title>
 <en>Yield Tracker</en>
 <de>Ertrags-Tracker</de>
@@ -42,6 +42,9 @@ Changelog
 * Material unloaded back onto the ground (e.g. dumped straw, cut open bales) is not counted again when it is picked up
 * Save data now stores crops by name, so it stays correct when maps or mods are added or removed
 * Yield history from older versions is converted automatically. Amounts recorded by older versions may be less accurate than new ones.
+
+1.2.0.0
+* Fixed fresh straw, grass and hay not counting as yield after a heap was dumped on the same farmland
 
 
 
@@ -84,6 +87,9 @@ Erfasst jede Fruchtart auf jeder Karte, auch Karten- und Mod-Früchte:
 * Speicherdaten speichern Fruchtarten jetzt nach Namen, damit sie beim Hinzufügen oder Entfernen von Karten/Mods korrekt bleiben
 * Der Ertragsverlauf aus älteren Versionen wird automatisch übernommen. Mengen, die von älteren Versionen erfasst wurden, können ungenauer sein als neue.
 
+1.2.0.0
+* Fehler behoben, durch den frisches Stroh, Gras und Heu nicht als Ertrag gezählt wurden, nachdem auf derselben Fläche ein Haufen abgeladen wurde
+
 Fragen oder Probleme?
 Fehler melden auf GitHub: https://github.com/Cantarix/FS25_YieldTracker
 ]]>
@@ -123,6 +129,9 @@ Journal des modifications
 * Les données de sauvegarde enregistrent désormais les cultures par nom afin de rester correctes lors de l'ajout ou du retrait de cartes/mods
 * L'historique des rendements des anciennes versions est converti automatiquement. Les quantités enregistrées par les anciennes versions peuvent être moins précises que les nouvelles.
 
+1.2.0.0
+* Correction : la paille, l'herbe et le foin frais n'étaient pas comptés comme rendement après le déversement d'un tas sur la même parcelle
+
 Des questions ou des problèmes ?
 Signalez les bugs sur GitHub : https://github.com/Cantarix/FS25_YieldTracker
 ]]>
@@ -160,6 +169,9 @@ Changelog
 * Il materiale scaricato di nuovo a terra (es. paglia scaricata, balle aperte) non viene più contato due volte quando viene raccolto
 * I dati di salvataggio memorizzano ora le colture per nome, così restano corretti quando si aggiungono o rimuovono mappe/mod
 * Lo storico delle rese delle versioni precedenti viene convertito automaticamente. Le quantità registrate dalle versioni precedenti potrebbero essere meno precise di quelle nuove.
+
+1.2.0.0
+* Corretto un errore per cui paglia, erba e fieno freschi non venivano conteggiati come resa dopo aver scaricato un cumulo sullo stesso terreno
 
 Feedback o problemi?
 Segnala bug su GitHub: https://github.com/Cantarix/FS25_YieldTracker
