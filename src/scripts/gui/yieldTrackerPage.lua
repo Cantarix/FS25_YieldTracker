@@ -10,6 +10,7 @@ YieldTrackerPage = {}
 YieldTrackerPage._mt = Class(YieldTrackerPage, TabbedMenuFrameElement)
 YieldTrackerPage.debug = false
 YieldTrackerPage.dir = g_currentModDirectory
+YieldTrackerPage.MAX_NAME_LENGTH = 18 -- Longer names don't fit the overview title
 
 function YieldTrackerPage.new(i18n, messageCenter)
     local self = YieldTrackerPage:superClass().new(nil, YieldTrackerPage._mt)
@@ -18,12 +19,12 @@ function YieldTrackerPage.new(i18n, messageCenter)
     self.i18n = i18n
     self.messageCenter = messageCenter
     self.dataBindings = {}
-    self.farmlandIDs = {}
+    self.fieldEntries = {}    -- rows of the field list: { farmlandId = id } or { group = combined field }
+    self.selectedEntry = nil
     self.yieldYears = {}
     self.cropInfo = {}      -- fill type descs with recorded yield (any map, any mod crop)
     self.selectedCrop = nil -- fill type index
-    self.selectedField = 1
-    self.showingOwnedFields = false
+    self.showingOwnedFields = true
 
 
     return self
@@ -50,25 +51,32 @@ function YieldTrackerPage:setupCustomButtons()
 
     self.showAllFieldButton = {
         inputAction = InputAction.MENU_ACTIVATE,
-        text = self.i18n:getText("yt_showOwnedFieldsBtnTxt"),
+        text = self.i18n:getText("yt_showAllFieldsBtnTxt"),
         callback = function ()
             self.showingOwnedFields = not self.showingOwnedFields
 
             if self.showingOwnedFields then
                 self.showAllFieldButton.text = self.i18n:getText("yt_showAllFieldsBtnTxt")
-                self:onShowOwnedFieldList()
             else
                 self.showAllFieldButton.text = self.i18n:getText("yt_showOwnedFieldsBtnTxt")
-                self:onShowAllFieldList()
             end
 
-            self:setMenuButtonInfoDirty() -- Refresh the button text
+            self:refreshFieldList()
+        end
+    }
+
+    self.combineFieldsButton = {
+        inputAction = InputAction.MENU_EXTRA_1,
+        text = self.i18n:getText("yt_combineFieldsBtnTxt"),
+        callback = function ()
+            self:onClickCombineFields()
         end
     }
 
     local info = {
 		self.backButtonInfo,
         self.showAllFieldButton,
+        self.combineFieldsButton,
 	}
 
     self.menuButtons = info
@@ -77,26 +85,11 @@ function YieldTrackerPage:setupCustomButtons()
 end
 
 
-function YieldTrackerPage:onShowOwnedFieldList()
-    self:getFarmlandIDs()
-    if self.farmlandList then
-        self.farmlandList:reloadData()
-    end
-end
-
-
-function YieldTrackerPage:onShowAllFieldList()
-    self:getFarmlandIDs()
-    if self.farmlandList then
-        self.farmlandList:reloadData()
-    end
-end
-
-
 function YieldTrackerPage:setButtons()
 	local info = {
 		self.backButtonInfo,
         self.showAllFieldButton,
+        self.combineFieldsButton,
 	}
 
     self.menuButtons = info
@@ -136,7 +129,7 @@ function YieldTrackerPage:onGuiSetupFinished()
     self:debugMessage("CropList found: " .. tostring(self.cropList ~= nil))
     self:debugMessage("FarmlandList found: " .. tostring(self.farmlandList ~= nil))
 
-    -- Set initial search param based on self.selectedField and self.selectedCrop
+    -- Set initial search param based on self.selectedEntry and self.selectedCrop
     self:setSelectedPageData()
 end
 
@@ -144,49 +137,134 @@ end
 
 function YieldTrackerPage:onFrameOpen()
     YieldTrackerPage:superClass().onFrameOpen(self)
-    self:getFarmlandIDs()
+
+    -- Also picks up crops harvested since the menu was last opened
+    self:refreshFieldList()
 
     if self.farmlandList then
-        self.farmlandList:reloadData()
         FocusManager:setFocus(self.farmlandList)
     else
         self:debugMessage("Error: farmlandList not found in onFrameOpen")
     end
 
-    -- Crops harvested since the menu was last opened need to show up
-    self:refreshCropList()
-
     if self.yieldPerYearList then
-        self:setSelectedPageData()
         self.yieldPerYearList:reloadData()
     end
 end
 
 
-function YieldTrackerPage:getFarmlandIDs()
+-- Opens the queued dialog a couple of frames later, once the dialog that queued it has closed.
+function YieldTrackerPage:update(dt)
+    YieldTrackerPage:superClass().update(self, dt)
+
+    if self.pendingDialog ~= nil then
+        self.pendingDialogDelay = self.pendingDialogDelay - 1
+        if self.pendingDialogDelay <= 0 then
+            local pendingDialog = self.pendingDialog
+            self.pendingDialog = nil
+            pendingDialog()
+        end
+    end
+end
+
+
+function YieldTrackerPage:queueDialog(openDialog)
+    self.pendingDialog = openDialog
+    self.pendingDialogDelay = 2
+end
+
+
+-- Returns the farmlands that can be shown on the farmland screen, optionally only the owned ones.
+function YieldTrackerPage:getFarmlandIDs(onlyOwned)
     local farmlandIDs = {}
     for id, farmland in pairs(g_farmlandManager.farmlands) do
         if farmland.showOnFarmlandsScreen then
             local isOwned = farmland.farmId == g_currentMission:getFarmId()
-            if self.showingOwnedFields then
-                if isOwned then
-                    table.insert(farmlandIDs, id)
-                end
-            else
+            if isOwned or not onlyOwned then
                 table.insert(farmlandIDs, id)
             end
         end
     end
     table.sort(farmlandIDs)
-    self.farmlandIDs = farmlandIDs
     return farmlandIDs
+end
+
+
+-- Builds the rows of the field list: the farmlands, then the combined fields. A combined field counts as owned
+-- when any of its farmlands is owned. Keeps the selected row when it is still listed, otherwise selects the first.
+function YieldTrackerPage:getFieldEntries()
+    local fieldEntries = {}
+    for _, farmlandId in ipairs(self:getFarmlandIDs(self.showingOwnedFields)) do
+        table.insert(fieldEntries, { farmlandId = farmlandId })
+    end
+
+    for _, group in ipairs(YieldTracker.fieldGroups) do
+        local isListed = not self.showingOwnedFields
+        for _, member in ipairs(group.members) do
+            local farmland = g_farmlandManager:getFarmlandById(member.farmlandId)
+            if farmland ~= nil and farmland.farmId == g_currentMission:getFarmId() then
+                isListed = true
+            end
+        end
+
+        if isListed then
+            table.insert(fieldEntries, { group = group })
+        end
+    end
+
+    self.fieldEntries = fieldEntries
+
+    local selected = self.selectedEntry
+    self.selectedEntry = fieldEntries[1]
+    for _, entry in ipairs(fieldEntries) do
+        if selected ~= nil and entry.farmlandId == selected.farmlandId and entry.group == selected.group then
+            self.selectedEntry = entry
+        end
+    end
+
+    return fieldEntries
+end
+
+
+-- Reloads the field list, keeps the highlighted row on the selected field and updates everything that depends on it.
+function YieldTrackerPage:refreshFieldList()
+    self:getFieldEntries()
+
+    if self.farmlandList then
+        self.farmlandList:reloadData()
+        for i, entry in ipairs(self.fieldEntries) do
+            if entry == self.selectedEntry then
+                self.farmlandList:setSelectedItem(1, i, false, false)
+                break
+            end
+        end
+    end
+
+    self:onFieldEntryChanged()
+end
+
+
+function YieldTrackerPage:onFieldEntryChanged()
+    self:refreshCropList()
+    self:setSelectedPageData()
+
+    local isGroup = self.selectedEntry ~= nil and self.selectedEntry.group ~= nil
+    self.combineFieldsButton.text = self.i18n:getText(isGroup and "yt_editCombinedFieldBtnTxt" or "yt_combineFieldsBtnTxt")
+    self:setMenuButtonInfoDirty() -- Refresh the button text
 end
 
 
 -- Builds the crop list from the fill types harvested on the selected field.
 -- Keeps the crop the player last picked when this field has it, so the same crop can be compared across fields.
 function YieldTrackerPage:getCropInfo()
-    self.cropInfo = YieldTracker:getRecordedFillTypes(self.selectedField)
+    local entry = self.selectedEntry
+    if entry == nil then
+        self.cropInfo = {}
+    elseif entry.group ~= nil then
+        self.cropInfo = YieldTracker:getFieldGroupFillTypes(entry.group)
+    else
+        self.cropInfo = YieldTracker:getRecordedFillTypes(entry.farmlandId)
+    end
 
     local preferredCrop = self.preferredCrop or self.selectedCrop
     for _, crop in ipairs(self.cropInfo) do
@@ -226,10 +304,275 @@ end
 
 
 function YieldTrackerPage:onClickFieldSelected(element)
-    self.selectedField = self.farmlandIDs[element.indexInSection]
-    self:refreshCropList()
-    self:setSelectedPageData()
+    self.selectedEntry = self.fieldEntries[element.indexInSection]
+    self:onFieldEntryChanged()
 end
+
+
+-- COMBINED FIELDS
+function YieldTrackerPage:getFieldTitle(farmlandId)
+    return string.format("%s %d", self.i18n:getText("yt_fieldIDLabel"), farmlandId)
+end
+
+
+-- Returns "3 + 4", listing each farmland once.
+function YieldTrackerPage:getFieldGroupMemberList(group)
+    local seen = {}
+    local farmlandIds = {}
+    for _, member in ipairs(group.members) do
+        if not seen[member.farmlandId] then
+            seen[member.farmlandId] = true
+            table.insert(farmlandIds, tostring(member.farmlandId))
+        end
+    end
+    return table.concat(farmlandIds, " + ")
+end
+
+
+function YieldTrackerPage:getFieldGroupTitle(group)
+    return group.name or string.format("%s %s", self.i18n:getText("yt_fieldIDLabel"), self:getFieldGroupMemberList(group))
+end
+
+
+function YieldTrackerPage:getEntryRowText(entry)
+    if entry.group == nil then
+        return self:getFieldTitle(entry.farmlandId)
+    elseif entry.group.name ~= nil then
+        return string.format("%s (%s)", entry.group.name, self:getFieldGroupMemberList(entry.group))
+    end
+    return self:getFieldGroupTitle(entry.group)
+end
+
+
+function YieldTrackerPage:getEntryTitle(entry)
+    if entry == nil then
+        return ""
+    elseif entry.group ~= nil then
+        return self:getFieldGroupTitle(entry.group)
+    end
+    return self:getFieldTitle(entry.farmlandId)
+end
+
+
+-- The small line under the field title, explaining why the numbers start late or look small.
+function YieldTrackerPage:getEntryNote(entry)
+    if entry == nil then
+        return ""
+    end
+
+    if entry.group ~= nil then
+        local startYear = YieldTracker:getFieldGroupStartYear(entry.group)
+        local endYear = YieldTracker:getFieldGroupEndYear(entry.group)
+        if endYear ~= nil then
+            return string.format(self.i18n:getText("yt_combinedRangeNote"), startYear, endYear)
+        end
+        return string.format(self.i18n:getText("yt_combinedSinceNote"), startYear)
+    end
+
+    local group, member = YieldTracker:getOpenFieldGroup(entry.farmlandId)
+    if group ~= nil then
+        return string.format(self.i18n:getText("yt_partOfNote"), self:getFieldGroupTitle(group), member.fromYear)
+    end
+    return ""
+end
+
+
+-- Offers a choice of years, newest first.
+function YieldTrackerPage:showYearDialog(prompt, title, minYear, maxYear, callback)
+    local years = {}
+    local options = {}
+    for year = maxYear, minYear, -1 do
+        table.insert(years, year)
+        table.insert(options, string.format("%s %d", self.i18n:getText("yt_yearLabel"), year))
+    end
+
+    OptionDialog.show(function(result)
+        if result > 0 then
+            callback(years[result])
+        end
+    end, prompt, title, options)
+end
+
+
+function YieldTrackerPage:showNameDialog(defaultName, callback)
+    self.nameDialogCallback = callback
+    TextInputDialog.show(self.onNameDialogResult, self, defaultName, self.i18n:getText("yt_namePrompt"), nil,
+        YieldTrackerPage.MAX_NAME_LENGTH, self.i18n:getText("yt_saveBtnTxt"), nil, nil, false)
+end
+
+
+function YieldTrackerPage:onNameDialogResult(text, success)
+    local callback = self.nameDialogCallback
+    self.nameDialogCallback = nil
+
+    if success and callback ~= nil then
+        local name = (text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        callback(name)
+    end
+end
+
+
+function YieldTrackerPage:onClickCombineFields()
+    local entry = self.selectedEntry
+    if entry == nil then
+        return
+    elseif entry.group ~= nil then
+        self:showEditDialog(entry.group)
+    else
+        self:showCombineDialog(entry.farmlandId)
+    end
+end
+
+
+-- Owned farmlands that aren't combined at the moment, apart from the ones given.
+function YieldTrackerPage:getCombineCandidates(excludedFarmlandId)
+    local candidates = {}
+    local options = {}
+    for _, farmlandId in ipairs(self:getFarmlandIDs(true)) do
+        if farmlandId ~= excludedFarmlandId and YieldTracker:getOpenFieldGroup(farmlandId) == nil then
+            table.insert(candidates, farmlandId)
+            table.insert(options, self:getFieldTitle(farmlandId))
+        end
+    end
+    return candidates, options
+end
+
+
+function YieldTrackerPage:showCombineDialog(farmlandId)
+    local group = YieldTracker:getOpenFieldGroup(farmlandId)
+    if group ~= nil then
+        InfoDialog.show(string.format(self.i18n:getText("yt_alreadyCombinedMsg"), self:getFieldTitle(farmlandId), self:getFieldGroupTitle(group)))
+        return
+    end
+
+    local candidates, options = self:getCombineCandidates(farmlandId)
+    if #candidates == 0 then
+        InfoDialog.show(self.i18n:getText("yt_noFieldsToCombineMsg"))
+        return
+    end
+
+    OptionDialog.show(function(result)
+        if result > 0 then
+            self:queueDialog(function() self:showCombineYearDialog(farmlandId, candidates[result]) end)
+        end
+    end, string.format(self.i18n:getText("yt_combineWithPrompt"), self:getFieldTitle(farmlandId)), self.i18n:getText("yt_combineFieldsBtnTxt"), options)
+end
+
+
+function YieldTrackerPage:showCombineYearDialog(farmlandId, otherFarmlandId)
+    local minYear = math.max(YieldTracker:getEarliestFreeYear(farmlandId), YieldTracker:getEarliestFreeYear(otherFarmlandId))
+
+    self:showYearDialog(self.i18n:getText("yt_combinedSincePrompt"), self.i18n:getText("yt_combineFieldsBtnTxt"), minYear, g_currentMission.environment.currentYear, function(year)
+        self:queueDialog(function()
+            local defaultName = string.format("%s %d + %d", self.i18n:getText("yt_fieldIDLabel"), farmlandId, otherFarmlandId)
+            self:showNameDialog(defaultName, function(name)
+                local groupName = name ~= "" and name ~= defaultName and name or nil
+                local group = YieldTracker:createFieldGroup({ farmlandId, otherFarmlandId }, year, groupName)
+                self.selectedEntry = { group = group }
+                self:refreshFieldList()
+            end)
+        end)
+    end)
+end
+
+
+function YieldTrackerPage:showEditDialog(group)
+    local title = self.i18n:getText("yt_editCombinedFieldBtnTxt")
+    local actions = {}
+    local options = {}
+    local function addAction(textKey, action)
+        table.insert(options, self.i18n:getText(textKey))
+        table.insert(actions, action)
+    end
+
+    local isRunning = YieldTracker:getFieldGroupEndYear(group) == nil
+    if isRunning then
+        addAction("yt_addFieldOption", function() self:showAddFieldDialog(group) end)
+    end
+    addAction("yt_changeStartYearOption", function() self:showStartYearDialog(group) end)
+    addAction("yt_renameOption", function()
+        self:showNameDialog(self:getFieldGroupTitle(group), function(name)
+            local defaultName = string.format("%s %s", self.i18n:getText("yt_fieldIDLabel"), self:getFieldGroupMemberList(group))
+            group.name = name ~= "" and name ~= defaultName and name or nil
+            self:refreshFieldList()
+        end)
+    end)
+    if isRunning then
+        addAction("yt_splitOption", function() self:showSplitDialog(group) end)
+    else
+        addAction("yt_undoSplitOption", function()
+            if YieldTracker:undoFieldGroupSplit(group) then
+                self:refreshFieldList()
+            else
+                InfoDialog.show(self.i18n:getText("yt_cannotUndoSplitMsg"))
+            end
+        end)
+    end
+    addAction("yt_deleteOption", function() self:showDeleteDialog(group) end)
+
+    OptionDialog.show(function(result)
+        if result > 0 then
+            self:queueDialog(actions[result])
+        end
+    end, self:getFieldGroupTitle(group), title, options)
+end
+
+
+function YieldTrackerPage:showAddFieldDialog(group)
+    local candidates, options = self:getCombineCandidates()
+    if #candidates == 0 then
+        InfoDialog.show(self.i18n:getText("yt_noFieldsToCombineMsg"))
+        return
+    end
+
+    OptionDialog.show(function(result)
+        if result > 0 then
+            self:queueDialog(function()
+                local farmlandId = candidates[result]
+                local minYear = math.max(YieldTracker:getFieldGroupStartYear(group), YieldTracker:getEarliestFreeYear(farmlandId))
+                self:showYearDialog(self.i18n:getText("yt_combinedSincePrompt"), self.i18n:getText("yt_addFieldOption"), minYear, g_currentMission.environment.currentYear, function(year)
+                    YieldTracker:addFieldGroupMember(group, farmlandId, year)
+                    self:refreshFieldList()
+                end)
+            end)
+        end
+    end, self.i18n:getText("yt_addFieldPrompt"), self.i18n:getText("yt_addFieldOption"), options)
+end
+
+
+function YieldTrackerPage:showStartYearDialog(group)
+    local minYear, maxYear = YieldTracker:getFieldGroupStartYearRange(group)
+    self:showYearDialog(self.i18n:getText("yt_combinedSincePrompt"), self.i18n:getText("yt_changeStartYearOption"), minYear, maxYear, function(year)
+        YieldTracker:setFieldGroupStartYear(group, year)
+        self:refreshFieldList()
+    end)
+end
+
+
+function YieldTrackerPage:showSplitDialog(group)
+    local minYear, maxYear = YieldTracker:getFieldGroupSplitYearRange(group)
+    if minYear > maxYear then
+        InfoDialog.show(self.i18n:getText("yt_cannotSplitMsg"))
+        return
+    end
+
+    self:showYearDialog(self.i18n:getText("yt_splitPrompt"), self.i18n:getText("yt_splitOption"), minYear, maxYear, function(year)
+        YieldTracker:splitFieldGroup(group, year)
+        self:refreshFieldList()
+    end)
+end
+
+
+function YieldTrackerPage:showDeleteDialog(group)
+    YesNoDialog.show(function(_, yes)
+        if yes then
+            YieldTracker:deleteFieldGroup(group)
+            self.selectedEntry = nil
+            self:refreshFieldList()
+        end
+    end, self, string.format(self.i18n:getText("yt_deletePrompt"), self:getFieldGroupTitle(group)), self.i18n:getText("yt_deleteOption"))
+end
+-- COMBINED FIELDS - END
 
 
 function YieldTrackerPage:setSelectedPageData()
@@ -241,7 +584,8 @@ end
 
 
 function YieldTrackerPage:initiateFieldCropStatsSearch()
-    local selectedField = self.selectedField
+    local entry = self.selectedEntry
+    local selectedField = entry ~= nil and entry.farmlandId or nil
     local selectedFillTypeIndex = self.selectedCrop
     local yieldData = YieldTracker.yieldData
     local currentYear = g_currentMission.environment.currentYear
@@ -250,9 +594,18 @@ function YieldTrackerPage:initiateFieldCropStatsSearch()
 
     local yearAmountMap = {}
     local minYear = nil
+    local lastYear = currentYear
 
     -- Step 1: Collect data and find min year (no crop selected means nothing has been recorded yet)
-    if selectedFillTypeIndex ~= nil then
+    if entry ~= nil and entry.group ~= nil and selectedFillTypeIndex ~= nil then
+        -- Combined field: its history starts in the year the fields were combined and stops if they were split
+        yearAmountMap = YieldTracker:getFieldGroupYearAmounts(entry.group, selectedFillTypeIndex)
+        for year in pairs(yearAmountMap) do
+            minYear = (minYear == nil or year < minYear) and year or minYear
+            foundData = true
+        end
+        lastYear = YieldTracker:getFieldGroupEndYear(entry.group) or currentYear
+    elseif selectedField ~= nil and selectedFillTypeIndex ~= nil then
         local fillTypeName = tostring(g_fillTypeManager:getFillTypeNameByIndex(selectedFillTypeIndex))
         self:debugMessage(string.format("Search stats for %s on field %d", fillTypeName, selectedField))
 
@@ -281,8 +634,11 @@ function YieldTrackerPage:initiateFieldCropStatsSearch()
 
     -- Step 2: Fill in all years from startYear (e.g., 1) to maxYear
     local startYear = 1 -- You can change this to the actual first possible year
+    if entry ~= nil and entry.group ~= nil then
+        startYear = YieldTracker:getFieldGroupStartYear(entry.group)
+    end
     if minYear ~= nil then
-        local maxYear = currentYear
+        local maxYear = lastYear
         -- Extend maxYear to the latest year found in data if it's greater
         for year in pairs(yearAmountMap) do
             if year > maxYear then
@@ -317,7 +673,6 @@ end
 function YieldTrackerPage:setOverviewStatsText()
     local cropName = ""
     local cropIcon = nil
-    local fieldID = self.selectedField or 0
 
     -- Get crop name from fillTypeIndex
     for _, crop in ipairs(self.cropInfo) do
@@ -341,7 +696,12 @@ function YieldTrackerPage:setOverviewStatsText()
     local selectedCropBestYear = self:getDescendantById("selectedCropBestYear")
 
     if selectedFieldNumText and selectedCropTypeText and selectedCropTypeIcon and selectedCropTotalHarvests and selectedCropAverageYield and selectedCropBestYear then
-        selectedFieldNumText:setText(string.format("%s %d", self.i18n:getText("yt_fieldIDLabel"), fieldID))
+        selectedFieldNumText:setText(self:getEntryTitle(self.selectedEntry))
+
+        local selectedFieldNoteText = self:getDescendantById("selectedFieldNoteText")
+        if selectedFieldNoteText then
+            selectedFieldNoteText:setText(self:getEntryNote(self.selectedEntry))
+        end
 
         -- Fill type titles are already localized by the game (including map/mod crops)
         selectedCropTypeText:setText(cropName)
@@ -527,10 +887,10 @@ end
 
 function YieldTrackerPage:populateCellForItemInSection(list, sectionIndex, index, listItem)
     if list == self.farmlandList then
-        local farmlandID = self.farmlandIDs[index]
+        local entry = self.fieldEntries[index]
         local fieldIDListText = listItem:getAttribute("fieldIDListText")
-        if fieldIDListText then
-            fieldIDListText:setText(string.format("%s %d", self.i18n:getText("yt_fieldIDLabel"), farmlandID))
+        if fieldIDListText and entry then
+            fieldIDListText:setText(self:getEntryRowText(entry))
         end
     elseif list == self.cropList then
         local crop = self.cropInfo[index]
@@ -573,7 +933,7 @@ end
 
 function YieldTrackerPage:getNumberOfItemsInSection(list, sectionIndex)
     if list == self.farmlandList then
-        return #self.farmlandIDs
+        return #self.fieldEntries
     elseif list == self.cropList then
         return #self.cropInfo
     elseif list == self.yieldPerYearList then

@@ -16,5 +16,27 @@
         <text name="yt_totalHarvestsLabel" text="Całkowite zbiory:"/>
         <text name="yt_averageYearTitleLabel" text="Średni plon:"/>
         <text name="yt_bestYearLabel" text="Najlepszy rok:"/>
+        <text name="yt_combineFieldsBtnTxt" text="Połącz pola"/>
+        <text name="yt_editCombinedFieldBtnTxt" text="Edytuj połączone pole"/>
+        <text name="yt_saveBtnTxt" text="Zapisz"/>
+        <text name="yt_combineWithPrompt" text="Połącz %s z:"/>
+        <text name="yt_combinedSincePrompt" text="Połączone od:"/>
+        <text name="yt_namePrompt" text="Nazwa połączonego pola:"/>
+        <text name="yt_addFieldOption" text="Dodaj pole"/>
+        <text name="yt_addFieldPrompt" text="Które pole dodać?"/>
+        <text name="yt_changeStartYearOption" text="Zmień rok początkowy"/>
+        <text name="yt_renameOption" text="Zmień nazwę"/>
+        <text name="yt_splitOption" text="Rozdziel"/>
+        <text name="yt_undoSplitOption" text="Cofnij rozdzielenie"/>
+        <text name="yt_deleteOption" text="Usuń"/>
+        <text name="yt_splitPrompt" text="Licz pola osobno, począwszy od:"/>
+        <text name="yt_deletePrompt" text="Usunąć %s? Dane o zbiorach nie zostaną utracone."/>
+        <text name="yt_combinedSinceNote" text="Połączone od roku %d"/>
+        <text name="yt_combinedRangeNote" text="Połączone lata %d - %d"/>
+        <text name="yt_partOfNote" text="Część %s od roku %d"/>
+        <text name="yt_alreadyCombinedMsg" text="%s jest już częścią %s."/>
+        <text name="yt_noFieldsToCombineMsg" text="Brak innych własnych pól do połączenia."/>
+        <text name="yt_cannotSplitMsg" text="Rozdzielenie jest możliwe dopiero w późniejszym roku. Aby usunąć, użyj opcji Usuń."/>
+        <text name="yt_cannotUndoSplitMsg" text="Pole z tej grupy należy już do innego połączonego pola."/>
     </texts>
 </l10n>

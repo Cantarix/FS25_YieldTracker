@@ -62,6 +62,7 @@
                     <!-- Selected Field Number -->
                     <Text profile="selectedFieldNumText" id="selectedFieldNumText" textVerticalAlignment="top"/>
                     <ThreePartBitmap profile="overviewNonHighlightedSeperator" />
+                    <Text profile="statsBoxLabels" id="selectedFieldNoteText" position="0.015 -0.047" textVerticalAlignment="top"/>
 
                     <!-- Selected Crop Type -->
                     <Text profile="statsBoxLabels" position="0.015 -0.07" text="$l10n_yt_cropTypeLabel" textVerticalAlignment="top"/>

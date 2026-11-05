@@ -21,6 +21,7 @@ Whether you're managing fields on your own or working with **AI workers** or **c
 - Automatically logs results while using AI workers or doing contracts
 - Simple and non-intrusive—just harvest like normal!
 - Great for **long-term farm planning** and **crop rotation optimization**
+- **Combine fields** you've joined together, from any year, and edit or split them later without losing harvest data
 
 ---
 

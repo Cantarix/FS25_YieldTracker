@@ -16,5 +16,27 @@
         <text name="yt_totalHarvestsLabel" text="Total Harvests:"/>
         <text name="yt_averageYearTitleLabel" text="Average Yield:"/>
         <text name="yt_bestYearLabel" text="Best Year:"/>
+        <text name="yt_combineFieldsBtnTxt" text="Combine Fields"/>
+        <text name="yt_editCombinedFieldBtnTxt" text="Edit Combined Field"/>
+        <text name="yt_saveBtnTxt" text="Save"/>
+        <text name="yt_combineWithPrompt" text="Combine %s with:"/>
+        <text name="yt_combinedSincePrompt" text="Combined since:"/>
+        <text name="yt_namePrompt" text="Name this combined field:"/>
+        <text name="yt_addFieldOption" text="Add a Field"/>
+        <text name="yt_addFieldPrompt" text="Which field should be added?"/>
+        <text name="yt_changeStartYearOption" text="Change Start Year"/>
+        <text name="yt_renameOption" text="Rename"/>
+        <text name="yt_splitOption" text="Split"/>
+        <text name="yt_undoSplitOption" text="Undo Split"/>
+        <text name="yt_deleteOption" text="Delete"/>
+        <text name="yt_splitPrompt" text="Count the fields separately starting in:"/>
+        <text name="yt_deletePrompt" text="Delete %s? No harvest data will be lost."/>
+        <text name="yt_combinedSinceNote" text="Combined since Year %d"/>
+        <text name="yt_combinedRangeNote" text="Combined Year %d - %d"/>
+        <text name="yt_partOfNote" text="Part of %s since Year %d"/>
+        <text name="yt_alreadyCombinedMsg" text="%s is already part of %s."/>
+        <text name="yt_noFieldsToCombineMsg" text="No other owned fields are available to combine."/>
+        <text name="yt_cannotSplitMsg" text="This can only be split in a later year. To remove it, use Delete."/>
+        <text name="yt_cannotUndoSplitMsg" text="A field in this group has since joined another combined field."/>
     </texts>
 </l10n>

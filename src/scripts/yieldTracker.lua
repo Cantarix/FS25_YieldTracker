@@ -11,6 +11,7 @@ YieldTracker = {
     yieldData = {},       -- yieldData[year][farmlandId][fillTypeIndex] = { amount = liters }
     unresolvedData = {},  -- saved entries whose fill type is not loaded (e.g. map/mod removed), kept so they survive a save
     availableLiters = {}, -- availableLiters[farmlandId][fillTypeKey][year] = liters field work placed on the ground, not picked up yet
+    fieldGroups = {},     -- combined fields: { name = optional text, members = { { farmlandId, fromYear, toYear (nil while running) }, ... } }
     windrowFillTypes = {},       -- set of crop windrow fill types (straw, grass, ...)
     pickupFillTypeCache = {},    -- fillTypeIndex -> true, or the time until which it counts as not pickable
     saveFileName = "yieldTrackerData.xml",
@@ -408,6 +409,211 @@ function YieldTracker:getRecordedFillTypes(farmlandId)
 end
 
 
+-- Combined fields never change the recorded data, which stays per farmland. A group only says which farmlands
+-- count together in which years, so a late or wrong entry can be corrected at any time without losing anything.
+function YieldTracker:getFieldGroupStartYear(group)
+    local startYear = nil
+    for _, member in ipairs(group.members) do
+        if startYear == nil or member.fromYear < startYear then
+            startYear = member.fromYear
+        end
+    end
+    return startYear
+end
+
+
+-- Returns the last combined year, or nil while the group is still running.
+function YieldTracker:getFieldGroupEndYear(group)
+    local endYear = nil
+    for _, member in ipairs(group.members) do
+        if member.toYear == nil then
+            return nil
+        end
+        endYear = math.max(endYear or member.toYear, member.toYear)
+    end
+    return endYear
+end
+
+
+-- Returns the group a farmland is currently combined in, if any.
+function YieldTracker:getOpenFieldGroup(farmlandId)
+    for _, group in ipairs(self.fieldGroups) do
+        for _, member in ipairs(group.members) do
+            if member.farmlandId == farmlandId and member.toYear == nil then
+                return group, member
+            end
+        end
+    end
+    return nil
+end
+
+
+-- Returns the first year a farmland is free to join a group, so one farmland is never in two groups in the same year.
+-- ignoreMember and beforeYear limit the check when moving the start of an existing member.
+function YieldTracker:getEarliestFreeYear(farmlandId, ignoreMember, beforeYear)
+    local year = 1
+    for _, group in ipairs(self.fieldGroups) do
+        for _, member in ipairs(group.members) do
+            if member.farmlandId == farmlandId and member ~= ignoreMember and member.toYear ~= nil
+                and (beforeYear == nil or member.fromYear < beforeYear) then
+                year = math.max(year, member.toYear + 1)
+            end
+        end
+    end
+    return year
+end
+
+
+function YieldTracker:createFieldGroup(farmlandIds, fromYear, name)
+    local group = { name = name, members = {} }
+    for _, farmlandId in ipairs(farmlandIds) do
+        table.insert(group.members, { farmlandId = farmlandId, fromYear = fromYear })
+    end
+    table.insert(self.fieldGroups, group)
+    return group
+end
+
+
+function YieldTracker:addFieldGroupMember(group, farmlandId, fromYear)
+    table.insert(group.members, { farmlandId = farmlandId, fromYear = fromYear })
+end
+
+
+function YieldTracker:deleteFieldGroup(group)
+    for i, otherGroup in ipairs(self.fieldGroups) do
+        if otherGroup == group then
+            table.remove(self.fieldGroups, i)
+            return
+        end
+    end
+end
+
+
+-- Returns the years the group's start can be moved to: only members that started with the group move,
+-- and they can't pass a member that joined later, their own end, or an earlier group they were part of.
+function YieldTracker:getFieldGroupStartYearRange(group)
+    local startYear = self:getFieldGroupStartYear(group)
+    local minYear = 1
+    local maxYear = g_currentMission.environment.currentYear
+
+    for _, member in ipairs(group.members) do
+        if member.fromYear == startYear then
+            minYear = math.max(minYear, self:getEarliestFreeYear(member.farmlandId, member, member.fromYear))
+            if member.toYear ~= nil then
+                maxYear = math.min(maxYear, member.toYear)
+            end
+        else
+            maxYear = math.min(maxYear, member.fromYear)
+        end
+    end
+
+    return minYear, maxYear
+end
+
+
+function YieldTracker:setFieldGroupStartYear(group, year)
+    local startYear = self:getFieldGroupStartYear(group)
+    for _, member in ipairs(group.members) do
+        if member.fromYear == startYear then
+            member.fromYear = year
+        end
+    end
+end
+
+
+-- Returns the years a group can be split from: every running member needs at least one combined year.
+function YieldTracker:getFieldGroupSplitYearRange(group)
+    local minYear = self:getFieldGroupStartYear(group) + 1
+    for _, member in ipairs(group.members) do
+        if member.toYear == nil then
+            minYear = math.max(minYear, member.fromYear + 1)
+        end
+    end
+    return minYear, g_currentMission.environment.currentYear
+end
+
+
+-- Ends the combination so the farmlands count separately from this year on. Its history stays.
+function YieldTracker:splitFieldGroup(group, year)
+    for _, member in ipairs(group.members) do
+        if member.toYear == nil then
+            member.toYear = year - 1
+        end
+    end
+end
+
+
+-- Reopens a split group. Fails if one of its farmlands has joined another group since.
+function YieldTracker:undoFieldGroupSplit(group)
+    local endYear = self:getFieldGroupEndYear(group)
+
+    for _, member in ipairs(group.members) do
+        if member.toYear == endYear then
+            for _, otherGroup in ipairs(self.fieldGroups) do
+                for _, otherMember in ipairs(otherGroup.members) do
+                    if otherMember.farmlandId == member.farmlandId and otherMember.fromYear > endYear then
+                        return false
+                    end
+                end
+            end
+        end
+    end
+
+    for _, member in ipairs(group.members) do
+        if member.toYear == endYear then
+            member.toYear = nil
+        end
+    end
+    return true
+end
+
+
+local function getIsMemberActiveInYear(member, year)
+    return year >= member.fromYear and (member.toYear == nil or year <= member.toYear)
+end
+
+
+-- Returns year -> liters of a fill type, adding up the members that were combined in each year.
+function YieldTracker:getFieldGroupYearAmounts(group, fillTypeIndex)
+    local yearAmounts = {}
+
+    for year, fields in pairs(self.yieldData) do
+        for _, member in ipairs(group.members) do
+            local crops = fields[member.farmlandId]
+            if crops ~= nil and crops[fillTypeIndex] ~= nil and getIsMemberActiveInYear(member, year) then
+                yearAmounts[year] = (yearAmounts[year] or 0) + crops[fillTypeIndex].amount
+            end
+        end
+    end
+
+    return yearAmounts
+end
+
+
+-- Returns the fill types recorded on the group's members in their combined years, sorted by title.
+function YieldTracker:getFieldGroupFillTypes(group)
+    local seen = {}
+    local fillTypes = {}
+
+    for year, fields in pairs(self.yieldData) do
+        for _, member in ipairs(group.members) do
+            if fields[member.farmlandId] ~= nil and getIsMemberActiveInYear(member, year) then
+                for fillTypeIndex in pairs(fields[member.farmlandId]) do
+                    local fillTypeDesc = g_fillTypeManager:getFillTypeByIndex(fillTypeIndex)
+                    if not seen[fillTypeIndex] and fillTypeDesc ~= nil then
+                        seen[fillTypeIndex] = true
+                        table.insert(fillTypes, fillTypeDesc)
+                    end
+                end
+            end
+        end
+    end
+
+    table.sort(fillTypes, function(a, b) return a.title < b.title end)
+    return fillTypes
+end
+
+
 -- Version 1 saves stored runtime fill type indices, which shift when maps/mods add fill types.
 -- Trust the index only if its title still matches, otherwise look the title up.
 function YieldTracker:resolveLegacyFillType(fillTypeIndex, title)
@@ -472,6 +678,7 @@ function YieldTracker:consoleCommandClearData()
     self.yieldData = {}
     self.unresolvedData = {}
     self.availableLiters = {}
+    self.fieldGroups = {}
     return "YieldTracker data cleared. Save the game to also clear the savegame file."
 end
 
@@ -486,6 +693,7 @@ function YieldTracker:shutdown()
     self.yieldData = {}
     self.unresolvedData = {}
     self.availableLiters = {}
+    self.fieldGroups = {}
     YieldTracker.activeCutter = nil
     YieldTracker.isDischargingToGround = false
 end
@@ -497,6 +705,7 @@ function YieldTracker:loadYieldData()
     self.yieldData = {}
     self.unresolvedData = {}
     self.availableLiters = {}
+    self.fieldGroups = {}
 
     if not g_currentMission or not g_currentMission.missionInfo.savegameDirectory then
         self:debugMessage("Load skipped: no savegame directory")
@@ -580,6 +789,35 @@ function YieldTracker:loadYieldData()
         a = a + 1
     end
 
+    -- Combined fields
+    local g = 0
+    while true do
+        local groupKey = string.format("yieldData.fieldGroups.group(%d)", g)
+        if not hasXMLProperty(xmlFile, groupKey) then break end
+
+        local group = { name = getXMLString(xmlFile, groupKey .. "#name"), members = {} }
+
+        local m = 0
+        while true do
+            local memberKey = string.format("%s.member(%d)", groupKey, m)
+            if not hasXMLProperty(xmlFile, memberKey) then break end
+
+            local farmlandId = getXMLInt(xmlFile, memberKey .. "#farmland")
+            local fromYear = getXMLInt(xmlFile, memberKey .. "#fromYear")
+            if farmlandId ~= nil and fromYear ~= nil then
+                table.insert(group.members, { farmlandId = farmlandId, fromYear = fromYear, toYear = getXMLInt(xmlFile, memberKey .. "#toYear") })
+            end
+
+            m = m + 1
+        end
+
+        if #group.members > 0 then
+            table.insert(self.fieldGroups, group)
+        end
+
+        g = g + 1
+    end
+
     delete(xmlFile)
 
     self:debugMessage("Yield data loaded from XML")
@@ -656,6 +894,23 @@ function YieldTracker:saveYieldData()
                     setXMLFloat(xmlFile, availableKey .. "#liters", liters)
                     a = a + 1
                 end
+            end
+        end
+    end
+
+    -- Save combined fields
+    for g, group in ipairs(self.fieldGroups) do
+        local groupKey = string.format("yieldData.fieldGroups.group(%d)", g - 1)
+        if group.name ~= nil then
+            setXMLString(xmlFile, groupKey .. "#name", group.name)
+        end
+
+        for m, member in ipairs(group.members) do
+            local memberKey = string.format("%s.member(%d)", groupKey, m - 1)
+            setXMLInt(xmlFile, memberKey .. "#farmland", member.farmlandId)
+            setXMLInt(xmlFile, memberKey .. "#fromYear", member.fromYear)
+            if member.toYear ~= nil then
+                setXMLInt(xmlFile, memberKey .. "#toYear", member.toYear)
             end
         end
     end

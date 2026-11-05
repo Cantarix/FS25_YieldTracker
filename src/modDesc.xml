@@ -45,6 +45,8 @@ Changelog
 
 1.2.0.0
 * Fixed fresh straw, grass and hay not counting as yield after a heap was dumped on the same farmland
+* Added combined fields: join fields from any year, including earlier ones. Combined fields can be edited, split or deleted at any time without losing harvest data
+* The field list now shows owned fields by default
 
 
 
@@ -89,6 +91,8 @@ Erfasst jede Fruchtart auf jeder Karte, auch Karten- und Mod-Früchte:
 
 1.2.0.0
 * Fehler behoben, durch den frisches Stroh, Gras und Heu nicht als Ertrag gezählt wurden, nachdem auf derselben Fläche ein Haufen abgeladen wurde
+* Zusammengelegte Felder hinzugefügt: Felder ab einem beliebigen Jahr verbinden, auch rückwirkend. Sie können jederzeit bearbeitet, getrennt oder gelöscht werden, ohne dass Erntedaten verloren gehen
+* Die Feldliste zeigt jetzt standardmäßig eigene Felder an
 
 Fragen oder Probleme?
 Fehler melden auf GitHub: https://github.com/Cantarix/FS25_YieldTracker
@@ -131,6 +135,8 @@ Journal des modifications
 
 1.2.0.0
 * Correction : la paille, l'herbe et le foin frais n'étaient pas comptés comme rendement après le déversement d'un tas sur la même parcelle
+* Ajout des champs combinés : réunissez des champs à partir de n'importe quelle année, même passée. Ils peuvent être modifiés, séparés ou supprimés à tout moment sans perte de données de récolte
+* La liste des champs affiche désormais vos champs par défaut
 
 Des questions ou des problèmes ?
 Signalez les bugs sur GitHub : https://github.com/Cantarix/FS25_YieldTracker
@@ -172,6 +178,8 @@ Changelog
 
 1.2.0.0
 * Corretto un errore per cui paglia, erba e fieno freschi non venivano conteggiati come resa dopo aver scaricato un cumulo sullo stesso terreno
+* Aggiunti i campi uniti: unisci i campi a partire da qualsiasi anno, anche passato. Possono essere modificati, separati o eliminati in qualsiasi momento senza perdere dati di raccolta
+* L'elenco dei campi ora mostra i campi di proprietà per impostazione predefinita
 
 Feedback o problemi?
 Segnala bug su GitHub: https://github.com/Cantarix/FS25_YieldTracker

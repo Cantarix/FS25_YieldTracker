@@ -16,5 +16,27 @@
         <text name="yt_totalHarvestsLabel" text="Celková sklizeň:"/>
         <text name="yt_averageYearTitleLabel" text="Průměrný výnos:"/>
         <text name="yt_bestYearLabel" text="Nejlepší rok:"/>
+        <text name="yt_combineFieldsBtnTxt" text="Spojit pole"/>
+        <text name="yt_editCombinedFieldBtnTxt" text="Upravit spojené pole"/>
+        <text name="yt_saveBtnTxt" text="Uložit"/>
+        <text name="yt_combineWithPrompt" text="Spojit %s s:"/>
+        <text name="yt_combinedSincePrompt" text="Spojeno od:"/>
+        <text name="yt_namePrompt" text="Název spojeného pole:"/>
+        <text name="yt_addFieldOption" text="Přidat pole"/>
+        <text name="yt_addFieldPrompt" text="Které pole přidat?"/>
+        <text name="yt_changeStartYearOption" text="Změnit počáteční rok"/>
+        <text name="yt_renameOption" text="Přejmenovat"/>
+        <text name="yt_splitOption" text="Rozdělit"/>
+        <text name="yt_undoSplitOption" text="Vrátit rozdělení"/>
+        <text name="yt_deleteOption" text="Smazat"/>
+        <text name="yt_splitPrompt" text="Počítat pole odděleně od:"/>
+        <text name="yt_deletePrompt" text="Smazat %s? Žádná data o sklizni se neztratí."/>
+        <text name="yt_combinedSinceNote" text="Spojeno od roku %d"/>
+        <text name="yt_combinedRangeNote" text="Spojeno roky %d - %d"/>
+        <text name="yt_partOfNote" text="Součást %s od roku %d"/>
+        <text name="yt_alreadyCombinedMsg" text="%s je již součástí %s."/>
+        <text name="yt_noFieldsToCombineMsg" text="Žádná další vlastní pole nejsou k dispozici."/>
+        <text name="yt_cannotSplitMsg" text="Rozdělit lze až v pozdějším roce. K odstranění použijte Smazat."/>
+        <text name="yt_cannotUndoSplitMsg" text="Pole z této skupiny mezitím patří k jinému spojenému poli."/>
     </texts>
 </l10n>
